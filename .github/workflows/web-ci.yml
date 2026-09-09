@@ -1,30 +1,53 @@
 name: Interactive Web CI
+
 on:
   push:
+    branches: ["main"]
   pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: interactive-web-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web:
+    name: Web verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: '22'}
-      - name: Install workspace
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install web workspace
         run: npm install --no-audit --no-fund
+      - name: Install backend dependencies for connected E2E
+        run: pip install -r requirements.txt
       - name: Typecheck
         run: npm run typecheck
-      - name: Engine tests
+      - name: Engine and bridge tests
         run: npm run test:web
       - name: Production build
         run: npm run build
-      - name: Boot and HTTP smoke
+      - name: Public fallback HTTP smoke
         run: |
           (cd frontend && npm start -- --hostname 127.0.0.1 --port 3000) >/tmp/kops-web.log 2>&1 &
           PID=$!; trap 'kill "$PID" 2>/dev/null || true' EXIT
           node <<'JS'
-          import fs from 'node:fs'; const sleep=ms=>new Promise(r=>setTimeout(r,ms)); let ready=false;
+          import fs from 'node:fs';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          let ready=false;
           const base='http://127.0.0.1:3000';
-          for(let i=0;i<80;i++){try{const r=await fetch(base+'/api/health');if(r.ok){ready=true;break}}catch{}await sleep(250)}
+          for(let i=0;i<80;i++){
+            try{const r=await fetch(base+'/api/health');if(r.ok){ready=true;break}}catch{}
+            await sleep(250)
+          }
           if(!ready){console.error(fs.readFileSync('/tmp/kops-web.log','utf8'));throw Error('server did not start')}
 
           let r=await fetch(base+'/');let t=await r.text();if(!r.ok||!t.includes('enterprise knowledge'))throw Error('homepage smoke')
@@ -32,19 +55,89 @@ jobs:
           r=await fetch(base+'/api/evaluation');j=await r.json();if(j.cases!==60||!j.all_passed)throw Error('evaluation gate')
 
           const brief='Create a sourcing decision brief for Alpha versus Beta.';
-          r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief})});j=await r.json();if(!r.ok||j.status!=='approval_required'||j.decision_pack?.approval!=='pending')throw Error('HITL gate')
+          r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief})});
+          j=await r.json();
+          if(!r.ok||j.status!=='approval_required'||j.decision_pack?.approval!=='pending'||j.runtime_mode!=='deterministic-public-demo')throw Error('fallback HITL gate')
 
-          // Public query endpoint may never accept a caller-supplied approval flag.
-          r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,approved:true})});if(r.status!==422)throw Error('self-approval bypass')
+          r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,approved:true})});
+          if(r.status!==422)throw Error('self-approval bypass')
 
-          // Explicit human action endpoint approves only pending decision briefs.
-          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief})});j=await r.json();if(!r.ok||j.status!=='completed'||j.decision_pack?.approval!=='approved')throw Error('explicit approval action')
-          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'Compare Alpha and Beta on price and warranty.'})});if(r.status!==409)throw Error('non-brief approval must fail')
-          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,admin_override:true})});if(r.status!==422)throw Error('approve unknown field')
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,decision:'approve'})});
+          j=await r.json();
+          if(!r.ok||j.status!=='completed'||j.decision_pack?.approval!=='approved')throw Error('fallback approval')
 
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,decision:'reject'})});
+          j=await r.json();
+          if(!r.ok||j.status!=='rejected'||j.decision_pack?.approval!=='rejected')throw Error('fallback rejection')
+
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,decision:'edit',edited_text:'Human-edited public recommendation.'})});
+          j=await r.json();
+          if(!r.ok||j.answer!=='Human-edited public recommendation.'||j.decision_pack?.approval!=='edited')throw Error('fallback edit')
+
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'Compare Alpha and Beta on price and warranty.'})});
+          if(r.status!==409)throw Error('non-brief approval must fail')
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,admin_override:true})});
+          if(r.status!==422)throw Error('approve unknown field')
           r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:'{bad'});if(r.status!==400)throw Error('malformed JSON')
           r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'valid question',admin_override:true})});if(r.status!==422)throw Error('unknown field')
           const huge=JSON.stringify({question:'a'.repeat(40000)});r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:huge});if(r.status!==413)throw Error('oversize query')
           r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:huge});if(r.status!==413)throw Error('oversize approve')
-          console.log('web smoke passed')
+          console.log('public fallback web smoke passed')
+          JS
+      - name: Connected FastAPI + LangGraph + Next.js E2E
+        run: |
+          uvicorn api:app --host 127.0.0.1 --port 8000 >/tmp/kops-api.log 2>&1 &
+          APID=$!
+          (cd frontend && KNOWLEDGEOPS_API_URL=http://127.0.0.1:8000 npm start -- --hostname 127.0.0.1 --port 3000) >/tmp/kops-web-connected.log 2>&1 &
+          WEBPID=$!
+          trap 'kill "$WEBPID" "$APID" 2>/dev/null || true' EXIT
+          node <<'JS'
+          import fs from 'node:fs';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          const web='http://127.0.0.1:3000';
+          const api='http://127.0.0.1:8000';
+          let ready=false;
+          for(let i=0;i<100;i++){
+            try{
+              const [wr,ar]=await Promise.all([fetch(web+'/api/health'),fetch(api+'/health')]);
+              if(wr.ok&&ar.ok){ready=true;break}
+            }catch{}
+            await sleep(250)
+          }
+          if(!ready){
+            console.error(fs.readFileSync('/tmp/kops-api.log','utf8'));
+            console.error(fs.readFileSync('/tmp/kops-web-connected.log','utf8'));
+            throw Error('connected stack did not start');
+          }
+
+          let r=await fetch(web+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'Compare Alpha and Beta on technical fit, price, lead time and warranty.'})});
+          let j=await r.json();
+          if(!r.ok||j.runtime_mode!=='langgraph-fastapi'||j.intent!=='compare'||j.status!=='completed'||j.sources.length<2||!j.thread_id)throw Error('connected query path')
+
+          const brief='Create a sourcing decision brief for Alpha versus Beta.';
+          async function pending(){
+            const response=await fetch(web+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief})});
+            const json=await response.json();
+            if(!response.ok||json.status!=='approval_required'||!json.thread_id||!json.sources.length)throw Error('connected pending state');
+            return json;
+          }
+
+          let p=await pending();
+          r=await fetch(web+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,thread_id:p.thread_id,decision:'approve'})});
+          j=await r.json();
+          if(!r.ok||j.status!=='completed'||j.thread_id!==p.thread_id||j.decision_pack?.approval!=='approved')throw Error('connected approve/resume')
+
+          p=await pending();
+          r=await fetch(web+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,thread_id:p.thread_id,decision:'edit',edited_text:'Human-edited connected recommendation.'})});
+          j=await r.json();
+          if(!r.ok||j.answer!=='Human-edited connected recommendation.'||j.thread_id!==p.thread_id||j.decision_pack?.approval!=='edited')throw Error('connected edit/resume')
+
+          p=await pending();
+          r=await fetch(web+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,thread_id:p.thread_id,decision:'reject'})});
+          j=await r.json();
+          if(!r.ok||j.status!=='rejected'||j.thread_id!==p.thread_id||j.decision_pack?.approval!=='rejected')throw Error('connected reject/resume')
+
+          r=await fetch(web+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,decision:'approve'})});
+          if(r.status!==422)throw Error('connected mode must require thread identity')
+          console.log('connected FastAPI + LangGraph + Next.js E2E passed')
           JS
