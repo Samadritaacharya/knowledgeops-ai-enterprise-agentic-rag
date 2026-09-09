@@ -1,11 +1,11 @@
-import test from 'node:test';
+import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { executeDecision, executeQuery, runtimeMode } from '../lib/backend.ts';
 
 const originalFetch = globalThis.fetch;
 const originalUrl = process.env.KNOWLEDGEOPS_API_URL;
 
-test.afterEach(() => {
+afterEach(() => {
   globalThis.fetch = originalFetch;
   if (originalUrl === undefined) delete process.env.KNOWLEDGEOPS_API_URL;
   else process.env.KNOWLEDGEOPS_API_URL = originalUrl;
