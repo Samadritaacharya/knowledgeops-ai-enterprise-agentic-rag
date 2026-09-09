@@ -46,7 +46,12 @@ The verified dependency path includes LangChain, LangGraph, Qdrant Client, FastA
 - TypeScript engine tests: **5/5 passed**
 - 60-case frontend intent routing: **passed**
 - 60-case expected-source retrieval gate: **passed**
-- decision brief requires approval and resumes: **passed**
+- decision brief requires approval: **passed**
+- explicit `/api/approve` action completes a pending brief: **passed**
+- `/api/query` self-approval bypass attempt rejected: **passed**
+- `/api/approve` refuses non-brief questions: **passed**
+- approval-route unknown-field rejection: **passed**
+- query-route unknown-field rejection: **passed**
 - revision response cites both controlled revisions: **passed**
 - retrieval determinism: **passed**
 - Next.js 16.3.4 production build: **passed**
@@ -57,8 +62,8 @@ The verified dependency path includes LangChain, LangGraph, Qdrant Client, FastA
 - `/api/query`: **passed**
 - `/api/approve`: **passed**
 - malformed JSON rejection: **passed**
-- unknown-field rejection: **passed**
-- oversized-request rejection: **passed**
+- oversized query rejection: **passed**
+- oversized approval rejection: **passed**
 
 ## What these results mean
 
@@ -72,7 +77,9 @@ The architecture preserves the rule:
 
 > **Language generation may advise; retrieval evidence and accountable humans retain authority.**
 
-A decision brief does not complete autonomously. The LangGraph reference path raises a real interrupt, preserves thread state and requires an explicit resume command. The CI verifies three human outcomes: approve, edit and reject. The deterministic `/v1/query` route cannot be used to self-assert approval.
+A decision brief does not complete autonomously. The Python LangGraph reference path raises a real interrupt, preserves thread state and requires an explicit resume command. The CI verifies three human outcomes: approve, edit and reject. The deterministic FastAPI query route cannot be used to self-assert approval.
+
+The public Next.js demo intentionally has no authentication or durable approval database. It therefore treats `/api/approve` as an explicit user interaction rather than a production identity control, while still preventing approval from being smuggled through `/api/query`. Production deployment would add authenticated approvers and durable audit state.
 
 ## Reproducible commands
 
