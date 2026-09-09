@@ -29,4 +29,6 @@ def resume_graph(thread_id:str,decision:dict):
     from langgraph.types import Command
     config={'configurable':{'thread_id':thread_id}}
     result=graph().invoke(Command(resume=decision),config=config)
-    return {'thread_id':thread_id,'status':'completed','state':result}
+    approval=result.get('approval',{}) if isinstance(result,dict) else {}
+    status='rejected' if approval.get('decision')=='reject' else 'completed'
+    return {'thread_id':thread_id,'status':status,'state':result}
