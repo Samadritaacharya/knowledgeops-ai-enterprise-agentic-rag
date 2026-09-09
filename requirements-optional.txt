@@ -1,5 +1,5 @@
 # Optional local/open-weight experiment stack; not required by the public demo or CI gate.
 langchain-community>=0.3.29,<1
 langchain-ollama>=0.3.7,<1
-langfuse>=3.3,<4
+langfuse>=4.15.1,<5
 ragas>=0.3,<1
