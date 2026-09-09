@@ -1,18 +1,31 @@
 name: Python AI CI
+
 on:
   push:
+    branches: ["main"]
   pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-ai-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
+    name: Python verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.13'}
+        with:
+          python-version: '3.13'
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m compileall -q api.py src
+        run: python -m compileall -q api.py src tests scripts
       - name: Core and governance tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: 60-case retrieval evaluation
@@ -42,9 +55,12 @@ jobs:
 
           pending=start_graph('Create a sourcing decision brief for Alpha versus Beta.')
           assert pending['status']=='approval_required'
+          assert pending['state']['sources']
+          assert pending['state']['source_ids']==[x['id'] for x in pending['state']['sources']]
           approved=resume_graph(pending['thread_id'],{'decision':'approve'})
           assert approved['status']=='completed'
           assert approved['state']['approval']['decision']=='approve'
+          assert approved['state']['sources']
 
           pending=start_graph('Create a sourcing decision brief for Alpha versus Beta.')
           edited=resume_graph(pending['thread_id'],{'decision':'edit','edited_text':'Human-edited sourcing recommendation.'})
@@ -96,16 +112,18 @@ jobs:
           r=httpx.post(base+'/v1/query',json={'question':'Create a sourcing decision brief for Alpha versus Beta.','approved':True})
           assert r.status_code==422
 
-          # Real stateful LangGraph approval path.
+          # Real stateful LangGraph approval path with backend evidence hydration.
           r=httpx.post(base+'/v1/graph/query',json={'question':'Create a sourcing decision brief for Alpha versus Beta.'})
           assert r.status_code==200
           pending=r.json()
           assert pending['status']=='approval_required' and pending['interrupts']
+          assert pending['state']['sources'] and pending['state']['source_ids']
           tid=pending['thread_id']
           r=httpx.post(base+'/v1/graph/resume',json={'thread_id':tid,'decision':'approve'})
           assert r.status_code==200
           approved=r.json()
           assert approved['status']=='completed' and approved['state']['approval']['decision']=='approve'
+          assert approved['thread_id']==tid
 
           # Human edit path updates the final answer on the resumed state.
           r=httpx.post(base+'/v1/graph/query',json={'question':'Create a sourcing decision brief for Alpha versus Beta.'})
