@@ -1,0 +1,1 @@
+{"name":"knowledgeops-ai","version":"1.0.0","private":true,"workspaces":["frontend"],"scripts":{"build":"npm run build --workspace=knowledgeops-ai-web","start":"npm run start --workspace=knowledgeops-ai-web","typecheck":"npm run typecheck --workspace=knowledgeops-ai-web","test:web":"npm test --workspace=knowledgeops-ai-web"},"engines":{"node":">=22"}}

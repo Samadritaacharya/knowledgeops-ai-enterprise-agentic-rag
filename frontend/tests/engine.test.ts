@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import { goldset } from '../lib/goldset.ts';import { classify,retrieve,runQuery } from '../lib/engine.ts';
+test('60 gold intents pass',()=>{assert.equal(goldset.length,60);for(const c of goldset)assert.equal(classify(c.question),c.expected_intent,c.id)});
+test('all 60 cases retrieve at least one expected source',()=>{for(const c of goldset){const got=new Set(retrieve(c.question,6).map(x=>x.id));assert.ok(c.expected_docs.some(x=>got.has(x)),c.id)}});
+test('brief requires approval and resumes',()=>{let r=runQuery('Create a sourcing decision brief for Alpha versus Beta.');assert.equal(r.status,'approval_required');assert.equal(r.decision_pack?.approval,'pending');r=runQuery('Create a sourcing decision brief for Alpha versus Beta.',true);assert.equal(r.status,'completed');assert.equal(r.decision_pack?.approval,'approved')});
+test('revision answer cites both revisions',()=>{const r=runQuery('What changed from Project Orion revision A to revision B?');assert.ok(r.citations.includes('SPEC-REV-A'));assert.ok(r.citations.includes('SPEC-REV-B'))});
+test('retrieval is deterministic',()=>{assert.deepEqual(retrieve('Alpha warranty security',6),retrieve('Alpha warranty security',6))});

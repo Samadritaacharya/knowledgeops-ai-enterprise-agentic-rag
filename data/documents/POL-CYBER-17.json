@@ -1,0 +1,8 @@
+{
+  "id": "POL-CYBER-17",
+  "title": "Supplier Cybersecurity Evidence Policy",
+  "type": "policy",
+  "revision": "4.2",
+  "tags": ["cybersecurity","policy","supplier"],
+  "content": "Suppliers of connected industrial products must provide evidence for vulnerability disclosure, secure update mechanisms, security update duration, software component inventory, and incident communication. For critical deployments, security review requires a threat model and an SBOM in CycloneDX or SPDX format before production release. Remote attestation is recommended for high-exposure systems."
+}

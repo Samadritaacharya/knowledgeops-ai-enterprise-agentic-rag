@@ -1,0 +1,8 @@
+{
+  "id": "DECISION-GOV-03",
+  "title": "Sourcing Decision Governance Standard",
+  "type": "governance",
+  "revision": "2.0",
+  "tags": ["governance","decision","procurement"],
+  "content": "A sourcing decision brief must distinguish mandatory requirements from preferences, cite source evidence, list unresolved assumptions, identify risk owners, and show commercial implications. The AI assistant may draft a decision brief, but a human category owner must approve the final recommendation before it is treated as an authorized sourcing decision."
+}

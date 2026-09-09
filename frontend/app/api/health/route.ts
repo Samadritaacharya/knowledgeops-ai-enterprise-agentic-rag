@@ -1,0 +1,1 @@
+import { NextResponse } from 'next/server';export function GET(){return NextResponse.json({ok:true,service:'knowledgeops-ai',paid_api_required:false,public_demo:'deterministic-hybrid-rag',langgraph_reference_backend:true,evaluation_cases:60})}
