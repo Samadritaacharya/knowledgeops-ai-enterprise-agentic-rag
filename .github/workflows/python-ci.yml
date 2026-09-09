@@ -24,34 +24,116 @@ jobs:
           from src.knowledgeops.langchain_pipeline import build_retrieval_runnable, chunk_documents, DeterministicHashEmbeddings
           from src.knowledgeops.langgraph_runtime import build_graph
           from src.knowledgeops.graph_service import start_graph, resume_graph
-          from src.knowledgeops.qdrant_store import build_local_qdrant
+          from src.knowledgeops.qdrant_store import build_local_qdrant, search_local_qdrant
+
           assert build_rewrite_chain().invoke({'question':'  compare   suppliers '})['question']=='compare suppliers'
-          rr=build_retrieval_runnable().invoke({'question':'Alpha warranty security'}); assert rr['hits']
+          rr=build_retrieval_runnable().invoke({'question':'Alpha warranty security'})
+          assert rr['hits']
           assert len(chunk_documents()) >= 12
           assert len(DeterministicHashEmbeddings().embed_query('hello')) == 192
-          g=build_graph(); assert g is not None
-          q=build_local_qdrant(); assert q is not None
-          pending=start_graph('Create a sourcing decision brief for Alpha versus Beta.'); assert pending['status']=='approval_required'
-          resumed=resume_graph(pending['thread_id'],{'decision':'approve'}); assert resumed['status']=='completed'
+
+          g=build_graph()
+          assert g is not None
+
+          q=build_local_qdrant()
+          vector_hits=search_local_qdrant(q,'Alpha warranty security',limit=3)
+          assert len(vector_hits)==3
+          assert all(x['doc_id'] and isinstance(x['score'],float) for x in vector_hits)
+
+          pending=start_graph('Create a sourcing decision brief for Alpha versus Beta.')
+          assert pending['status']=='approval_required'
+          approved=resume_graph(pending['thread_id'],{'decision':'approve'})
+          assert approved['status']=='completed'
+          assert approved['state']['approval']['decision']=='approve'
+
+          pending=start_graph('Create a sourcing decision brief for Alpha versus Beta.')
+          edited=resume_graph(pending['thread_id'],{'decision':'edit','edited_text':'Human-edited sourcing recommendation.'})
+          assert edited['status']=='completed'
+          assert edited['state']['answer']=='Human-edited sourcing recommendation.'
+
+          pending=start_graph('Create a sourcing decision brief for Alpha versus Beta.')
+          rejected=resume_graph(pending['thread_id'],{'decision':'reject'})
+          assert rejected['status']=='rejected'
+          assert rejected['state']['approval']['decision']=='reject'
           print('framework smoke passed')
           PY
-      - name: FastAPI smoke
+      - name: FastAPI end-to-end smoke
         run: |
           uvicorn api:app --host 127.0.0.1 --port 8000 >/tmp/kops-api.log 2>&1 &
           PID=$!; trap 'kill $PID' EXIT
           python - <<'PY'
-          import json,time,urllib.request
-          for _ in range(40):
-            try:
-              with urllib.request.urlopen('http://127.0.0.1:8000/health') as r:
-                j=json.load(r); assert j['paid_api_required'] is False
-              break
-            except Exception: time.sleep(.25)
-          else: raise SystemExit('API did not start')
-          req=urllib.request.Request('http://127.0.0.1:8000/v1/query',data=json.dumps({'question':'Compare Alpha and Beta on technical fit, price, lead time and warranty.'}).encode(),headers={'content-type':'application/json'})
-          with urllib.request.urlopen(req) as r:
-            j=json.load(r); assert j['intent']=='compare' and len(j['citations'])>=2
-          print('FastAPI smoke passed')
+          import time
+          import httpx
+
+          base='http://127.0.0.1:8000'
+          for _ in range(60):
+              try:
+                  r=httpx.get(base+'/health',timeout=2)
+                  if r.status_code==200:
+                      break
+              except Exception:
+                  pass
+              time.sleep(.25)
+          else:
+              raise SystemExit('API did not start')
+
+          j=r.json()
+          assert j['ok'] is True
+          assert j['paid_api_required'] is False
+          assert j['policy']=='citations-first-human-authority'
+
+          r=httpx.post(base+'/v1/query',json={'question':'Compare Alpha and Beta on technical fit, price, lead time and warranty.'})
+          assert r.status_code==200
+          j=r.json()
+          assert j['intent']=='compare' and len(j['citations'])>=2 and j['status']=='completed'
+
+          r=httpx.post(base+'/v1/query',json={'question':'Create a sourcing decision brief for Alpha versus Beta.'})
+          assert r.status_code==200
+          j=r.json()
+          assert j['status']=='approval_required' and j['approval_required'] is True
+
+          # External callers cannot bypass approval by self-asserting an `approved` field.
+          r=httpx.post(base+'/v1/query',json={'question':'Create a sourcing decision brief for Alpha versus Beta.','approved':True})
+          assert r.status_code==422
+
+          # Real stateful LangGraph approval path.
+          r=httpx.post(base+'/v1/graph/query',json={'question':'Create a sourcing decision brief for Alpha versus Beta.'})
+          assert r.status_code==200
+          pending=r.json()
+          assert pending['status']=='approval_required' and pending['interrupts']
+          tid=pending['thread_id']
+          r=httpx.post(base+'/v1/graph/resume',json={'thread_id':tid,'decision':'approve'})
+          assert r.status_code==200
+          approved=r.json()
+          assert approved['status']=='completed' and approved['state']['approval']['decision']=='approve'
+
+          # Human edit path updates the final answer on the resumed state.
+          r=httpx.post(base+'/v1/graph/query',json={'question':'Create a sourcing decision brief for Alpha versus Beta.'})
+          tid=r.json()['thread_id']
+          edited_text='Human-edited recommendation after evidence review.'
+          r=httpx.post(base+'/v1/graph/resume',json={'thread_id':tid,'decision':'edit','edited_text':edited_text})
+          assert r.status_code==200
+          edited=r.json()
+          assert edited['status']=='completed' and edited['state']['answer']==edited_text
+
+          # Rejection is represented explicitly rather than masquerading as approval/completion.
+          r=httpx.post(base+'/v1/graph/query',json={'question':'Create a sourcing decision brief for Alpha versus Beta.'})
+          tid=r.json()['thread_id']
+          r=httpx.post(base+'/v1/graph/resume',json={'thread_id':tid,'decision':'reject'})
+          assert r.status_code==200
+          rejected=r.json()
+          assert rejected['status']=='rejected' and rejected['state']['approval']['decision']=='reject'
+
+          # Validation/error contracts.
+          r=httpx.post(base+'/v1/query',json={'question':'valid question','admin_override':True})
+          assert r.status_code==422
+          r=httpx.post(base+'/v1/graph/resume',json={'thread_id':'12345','decision':'edit'})
+          assert r.status_code==422
+          r=httpx.post(base+'/v1/graph/resume',json={'thread_id':'12345','decision':'override'})
+          assert r.status_code==422
+          r=httpx.post(base+'/v1/query',content='{bad',headers={'content-type':'application/json'})
+          assert r.status_code==422
+          print('FastAPI end-to-end smoke passed')
           PY
       - name: Docker build
         run: docker build -t knowledgeops-ai .

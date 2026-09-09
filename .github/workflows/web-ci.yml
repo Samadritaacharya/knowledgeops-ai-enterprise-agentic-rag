@@ -23,15 +23,28 @@ jobs:
           PID=$!; trap 'kill "$PID" 2>/dev/null || true' EXIT
           node <<'JS'
           import fs from 'node:fs'; const sleep=ms=>new Promise(r=>setTimeout(r,ms)); let ready=false;
-          for(let i=0;i<80;i++){try{const r=await fetch('http://127.0.0.1:3000/api/health');if(r.ok){ready=true;break}}catch{}await sleep(250)}
+          const base='http://127.0.0.1:3000';
+          for(let i=0;i<80;i++){try{const r=await fetch(base+'/api/health');if(r.ok){ready=true;break}}catch{}await sleep(250)}
           if(!ready){console.error(fs.readFileSync('/tmp/kops-web.log','utf8'));throw Error('server did not start')}
-          let r=await fetch('http://127.0.0.1:3000/');let t=await r.text();if(!r.ok||!t.includes('enterprise knowledge'))throw Error('homepage smoke')
-          r=await fetch('http://127.0.0.1:3000/api/health');let j=await r.json();if(!r.ok||j.paid_api_required!==false||j.evaluation_cases!==60)throw Error('health contract')
-          r=await fetch('http://127.0.0.1:3000/api/evaluation');j=await r.json();if(j.cases!==60||!j.all_passed)throw Error('evaluation gate')
-          r=await fetch('http://127.0.0.1:3000/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'Create a sourcing decision brief for Alpha versus Beta.'})});j=await r.json();if(!r.ok||j.status!=='approval_required')throw Error('HITL gate')
-          r=await fetch('http://127.0.0.1:3000/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'Create a sourcing decision brief for Alpha versus Beta.'})});j=await r.json();if(!r.ok||j.decision_pack.approval!=='approved')throw Error('approval resume')
-          r=await fetch('http://127.0.0.1:3000/api/query',{method:'POST',headers:{'content-type':'application/json'},body:'{bad'});if(r.status!==400)throw Error('malformed JSON')
-          r=await fetch('http://127.0.0.1:3000/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'valid question',admin_override:true})});if(r.status!==422)throw Error('unknown field')
-          const huge=JSON.stringify({question:'a'.repeat(40000)});r=await fetch('http://127.0.0.1:3000/api/query',{method:'POST',headers:{'content-type':'application/json'},body:huge});if(r.status!==413)throw Error('oversize')
+
+          let r=await fetch(base+'/');let t=await r.text();if(!r.ok||!t.includes('enterprise knowledge'))throw Error('homepage smoke')
+          r=await fetch(base+'/api/health');let j=await r.json();if(!r.ok||j.paid_api_required!==false||j.evaluation_cases!==60)throw Error('health contract')
+          r=await fetch(base+'/api/evaluation');j=await r.json();if(j.cases!==60||!j.all_passed)throw Error('evaluation gate')
+
+          const brief='Create a sourcing decision brief for Alpha versus Beta.';
+          r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief})});j=await r.json();if(!r.ok||j.status!=='approval_required'||j.decision_pack?.approval!=='pending')throw Error('HITL gate')
+
+          // Public query endpoint may never accept a caller-supplied approval flag.
+          r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,approved:true})});if(r.status!==422)throw Error('self-approval bypass')
+
+          // Explicit human action endpoint approves only pending decision briefs.
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief})});j=await r.json();if(!r.ok||j.status!=='completed'||j.decision_pack?.approval!=='approved')throw Error('explicit approval action')
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'Compare Alpha and Beta on price and warranty.'})});if(r.status!==409)throw Error('non-brief approval must fail')
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:brief,admin_override:true})});if(r.status!==422)throw Error('approve unknown field')
+
+          r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:'{bad'});if(r.status!==400)throw Error('malformed JSON')
+          r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'valid question',admin_override:true})});if(r.status!==422)throw Error('unknown field')
+          const huge=JSON.stringify({question:'a'.repeat(40000)});r=await fetch(base+'/api/query',{method:'POST',headers:{'content-type':'application/json'},body:huge});if(r.status!==413)throw Error('oversize query')
+          r=await fetch(base+'/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:huge});if(r.status!==413)throw Error('oversize approve')
           console.log('web smoke passed')
           JS

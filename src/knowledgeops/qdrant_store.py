@@ -25,3 +25,16 @@ def build_local_qdrant(path=':memory:'):
     docs=load_corpus()
     client.upsert('knowledgeops',[models.PointStruct(id=i,vector=embed(d.title+' '+d.content),payload={'doc_id':d.id,'title':d.title}) for i,d in enumerate(docs)])
     return client
+
+def search_local_qdrant(client,text:str,limit:int=3)->list[dict]:
+    """Run an actual local vector query and return compact, inspectable results."""
+    response=client.query_points(collection_name='knowledgeops',query=embed(text),limit=limit,with_payload=True)
+    points=getattr(response,'points',response)
+    return [
+        {
+            'doc_id':(p.payload or {}).get('doc_id'),
+            'title':(p.payload or {}).get('title'),
+            'score':float(p.score),
+        }
+        for p in points
+    ]

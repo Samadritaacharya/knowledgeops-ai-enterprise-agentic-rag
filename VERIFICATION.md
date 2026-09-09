@@ -1,10 +1,10 @@
 # Verification snapshot
 
-KnowledgeOps AI is verified through two clean GitHub Actions pipelines: **Python AI CI** and **Interactive Web CI**. The mandatory project path is designed to run without a paid model API.
+KnowledgeOps AI is verified through two clean GitHub Actions pipelines: **Python AI CI** and **Interactive Web CI**. The mandatory path is designed to run without a paid model API.
 
 ## Clean GitHub verification
 
-A clean GitHub runner verified the complete implementation after the TypeScript corpus-tag narrowing fix.
+The current end-to-end suite validates the deterministic retrieval/workflow layer, the real LangGraph stateful approval path, local Qdrant vector queries, FastAPI contracts, the production Next.js application and Docker packaging.
 
 ### Python / AI backend
 
@@ -18,14 +18,26 @@ A clean GitHub runner verified the complete implementation after the TypeScript 
 - Deterministic embeddings: **passed**
 - LangGraph graph construction: **passed**
 - Real LangGraph decision-brief interrupt: **passed**
-- LangGraph resume/approval: **passed**
+- LangGraph approve/resume path: **passed**
+- LangGraph human-edit path: **passed**
+- LangGraph explicit rejection path: **passed**
 - Qdrant local-mode construction: **passed**
+- Actual local Qdrant vector query: **passed**
 - FastAPI production startup: **passed**
 - FastAPI `/health`: **passed**
-- FastAPI `/v1/query`: **passed**
+- FastAPI deterministic comparison query: **passed**
+- FastAPI decision brief remains `approval_required`: **passed**
+- FastAPI self-approval bypass attempt (`approved=true`) rejected: **passed**
+- FastAPI real `/v1/graph/query` → `/v1/graph/resume` approve flow: **passed**
+- FastAPI human-edit flow: **passed**
+- FastAPI reject flow returns `rejected`: **passed**
+- FastAPI unknown-field rejection: **passed**
+- FastAPI invalid decision rejection: **passed**
+- FastAPI edit-without-text rejection: **passed**
+- FastAPI malformed JSON rejection: **passed**
 - Docker production image build: **passed**
 
-The verified dependency stack included LangChain, LangGraph, Qdrant Client, FastAPI, Pydantic and Uvicorn on Python 3.13.
+The verified dependency path includes LangChain, LangGraph, Qdrant Client, FastAPI, Pydantic and Uvicorn on Python 3.13.
 
 ### Interactive web application
 
@@ -34,7 +46,12 @@ The verified dependency stack included LangChain, LangGraph, Qdrant Client, Fast
 - TypeScript engine tests: **5/5 passed**
 - 60-case frontend intent routing: **passed**
 - 60-case expected-source retrieval gate: **passed**
-- decision brief requires approval and resumes: **passed**
+- decision brief requires approval: **passed**
+- explicit `/api/approve` action completes a pending brief: **passed**
+- `/api/query` self-approval bypass attempt rejected: **passed**
+- `/api/approve` refuses non-brief questions: **passed**
+- approval-route unknown-field rejection: **passed**
+- query-route unknown-field rejection: **passed**
 - revision response cites both controlled revisions: **passed**
 - retrieval determinism: **passed**
 - Next.js 16.3.4 production build: **passed**
@@ -45,22 +62,24 @@ The verified dependency stack included LangChain, LangGraph, Qdrant Client, Fast
 - `/api/query`: **passed**
 - `/api/approve`: **passed**
 - malformed JSON rejection: **passed**
-- unknown-field rejection: **passed**
-- oversized-request rejection: **passed**
+- oversized query rejection: **passed**
+- oversized approval rejection: **passed**
 
 ## What these results mean
 
-The repository has evidence that its checked-in deterministic workflow, retrieval baseline, framework adapters, stateful approval path, APIs, production web build and Docker image work together in a clean CI environment.
+The repository has repeatable evidence that its checked-in deterministic workflow, retrieval baseline, LangChain adapters, local vector-store path, real stateful approval flow, APIs, production web build and Docker image operate together in a clean GitHub runner.
 
 The **60-case evaluation is a synthetic regression fixture**, not a claim of real-world procurement accuracy, legal compliance or production-grade model quality. The corpus is intentionally synthetic and small enough to make the evaluation inspectable.
 
 ## Authority boundary tested by the project
 
-The architecture preserves the following rule:
+The architecture preserves the rule:
 
 > **Language generation may advise; retrieval evidence and accountable humans retain authority.**
 
-A decision brief does not complete autonomously. The LangGraph reference path raises a real interrupt, preserves thread state and requires an explicit resume command before completing the workflow.
+A decision brief does not complete autonomously. The Python LangGraph reference path raises a real interrupt, preserves thread state and requires an explicit resume command. The CI verifies three human outcomes: approve, edit and reject. The deterministic FastAPI query route cannot be used to self-assert approval.
+
+The public Next.js demo intentionally has no authentication or durable approval database. It therefore treats `/api/approve` as an explicit user interaction rather than a production identity control, while still preventing approval from being smuggled through `/api/query`. Production deployment would add authenticated approvers and durable audit state.
 
 ## Reproducible commands
 
