@@ -39,8 +39,12 @@ def build_graph():
 
     def approval_node(state:AgentState):
         if state.get('intent')!='brief': return {}
-        decision=interrupt({'type':'decision_brief_approval','answer':state['answer'],'citations':state['citations'],'allowed':['approve','edit','reject']})
-        return {'approval': decision if isinstance(decision,dict) else {'decision':decision}}
+        raw=interrupt({'type':'decision_brief_approval','answer':state['answer'],'citations':state['citations'],'allowed':['approve','edit','reject']})
+        decision=raw if isinstance(raw,dict) else {'decision':raw}
+        update={'approval':decision}
+        if decision.get('decision')=='edit' and decision.get('edited_text'):
+            update['answer']=decision['edited_text']
+        return update
 
     graph=StateGraph(AgentState)
     graph.add_node('classify',classify_node)
