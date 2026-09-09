@@ -1,0 +1,8 @@
+{
+  "id": "SPEC-REV-B",
+  "title": "Project Orion Interface Specification — Revision B",
+  "type": "revision",
+  "revision": "B",
+  "tags": ["revision","orion","interface"],
+  "content": "Revision B requires two Gigabit Ethernet ports, Wi-Fi 6E or newer, a maximum enclosure depth of 115 mm, operating temperature of -20°C to +65°C, and a 48-month warranty. Integrated 5G connectivity is now mandatory. Security updates are required for seven years and remote attestation is preferred."
+}

@@ -1,0 +1,57 @@
+name: Python AI CI
+on:
+  push:
+  pull_request:
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - name: Compile
+        run: python -m compileall -q api.py src
+      - name: Core and governance tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: 60-case retrieval evaluation
+        run: python scripts/evaluate.py
+      - name: LangChain/LangGraph/Qdrant smoke
+        run: |
+          python - <<'PY'
+          from src.knowledgeops.langchain_components import build_rewrite_chain
+          from src.knowledgeops.langchain_pipeline import build_retrieval_runnable, chunk_documents, DeterministicHashEmbeddings
+          from src.knowledgeops.langgraph_runtime import build_graph
+          from src.knowledgeops.graph_service import start_graph, resume_graph
+          from src.knowledgeops.qdrant_store import build_local_qdrant
+          assert build_rewrite_chain().invoke({'question':'  compare   suppliers '})['question']=='compare suppliers'
+          rr=build_retrieval_runnable().invoke({'question':'Alpha warranty security'}); assert rr['hits']
+          assert len(chunk_documents()) >= 12
+          assert len(DeterministicHashEmbeddings().embed_query('hello')) == 192
+          g=build_graph(); assert g is not None
+          q=build_local_qdrant(); assert q is not None
+          pending=start_graph('Create a sourcing decision brief for Alpha versus Beta.'); assert pending['status']=='approval_required'
+          resumed=resume_graph(pending['thread_id'],{'decision':'approve'}); assert resumed['status']=='completed'
+          print('framework smoke passed')
+          PY
+      - name: FastAPI smoke
+        run: |
+          uvicorn api:app --host 127.0.0.1 --port 8000 >/tmp/kops-api.log 2>&1 &
+          PID=$!; trap 'kill $PID' EXIT
+          python - <<'PY'
+          import json,time,urllib.request
+          for _ in range(40):
+            try:
+              with urllib.request.urlopen('http://127.0.0.1:8000/health') as r:
+                j=json.load(r); assert j['paid_api_required'] is False
+              break
+            except Exception: time.sleep(.25)
+          else: raise SystemExit('API did not start')
+          req=urllib.request.Request('http://127.0.0.1:8000/v1/query',data=json.dumps({'question':'Compare Alpha and Beta on technical fit, price, lead time and warranty.'}).encode(),headers={'content-type':'application/json'})
+          with urllib.request.urlopen(req) as r:
+            j=json.load(r); assert j['intent']=='compare' and len(j['citations'])>=2
+          print('FastAPI smoke passed')
+          PY
+      - name: Docker build
+        run: docker build -t knowledgeops-ai .

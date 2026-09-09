@@ -1,0 +1,8 @@
+{
+  "id": "SUP-BETA-SPEC",
+  "title": "Supplier Beta — Industrial Gateway Specification",
+  "type": "supplier_spec",
+  "revision": "C",
+  "tags": ["gateway","supplier","technical","beta"],
+  "content": "Supplier Beta offers the BG-550 rugged industrial gateway. Operating temperature is -30°C to +70°C. Ingress protection is IP67. Typical power draw is 24 W. Connectivity includes dual Gigabit Ethernet, Wi-Fi 6E, and integrated 5G. Security capabilities include TPM 2.0, secure boot, signed firmware, remote attestation, and a seven-year security update commitment. Standard lead time is 12 weeks. Unit price for 500 units is EUR 486. Warranty is 60 months. Beta reports 48% renewable electricity in final assembly."
+}

@@ -1,0 +1,37 @@
+name: Interactive Web CI
+on:
+  push:
+  pull_request:
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Install workspace
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Engine tests
+        run: npm run test:web
+      - name: Production build
+        run: npm run build
+      - name: Boot and HTTP smoke
+        run: |
+          (cd frontend && npm start -- --hostname 127.0.0.1 --port 3000) >/tmp/kops-web.log 2>&1 &
+          PID=$!; trap 'kill "$PID" 2>/dev/null || true' EXIT
+          node <<'JS'
+          import fs from 'node:fs'; const sleep=ms=>new Promise(r=>setTimeout(r,ms)); let ready=false;
+          for(let i=0;i<80;i++){try{const r=await fetch('http://127.0.0.1:3000/api/health');if(r.ok){ready=true;break}}catch{}await sleep(250)}
+          if(!ready){console.error(fs.readFileSync('/tmp/kops-web.log','utf8'));throw Error('server did not start')}
+          let r=await fetch('http://127.0.0.1:3000/');let t=await r.text();if(!r.ok||!t.includes('enterprise knowledge'))throw Error('homepage smoke')
+          r=await fetch('http://127.0.0.1:3000/api/health');let j=await r.json();if(!r.ok||j.paid_api_required!==false||j.evaluation_cases!==60)throw Error('health contract')
+          r=await fetch('http://127.0.0.1:3000/api/evaluation');j=await r.json();if(j.cases!==60||!j.all_passed)throw Error('evaluation gate')
+          r=await fetch('http://127.0.0.1:3000/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'Create a sourcing decision brief for Alpha versus Beta.'})});j=await r.json();if(!r.ok||j.status!=='approval_required')throw Error('HITL gate')
+          r=await fetch('http://127.0.0.1:3000/api/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'Create a sourcing decision brief for Alpha versus Beta.'})});j=await r.json();if(!r.ok||j.decision_pack.approval!=='approved')throw Error('approval resume')
+          r=await fetch('http://127.0.0.1:3000/api/query',{method:'POST',headers:{'content-type':'application/json'},body:'{bad'});if(r.status!==400)throw Error('malformed JSON')
+          r=await fetch('http://127.0.0.1:3000/api/query',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'valid question',admin_override:true})});if(r.status!==422)throw Error('unknown field')
+          const huge=JSON.stringify({question:'a'.repeat(40000)});r=await fetch('http://127.0.0.1:3000/api/query',{method:'POST',headers:{'content-type':'application/json'},body:huge});if(r.status!==413)throw Error('oversize')
+          console.log('web smoke passed')
+          JS

@@ -1,0 +1,1 @@
+import './globals.css';export const metadata={title:'KnowledgeOps AI — Enterprise Agentic RAG Platform',description:'LangChain/LangGraph enterprise RAG, evidence and human approval.'};export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en"><body>{children}</body></html>}

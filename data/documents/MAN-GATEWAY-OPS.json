@@ -1,0 +1,8 @@
+{
+  "id": "MAN-GATEWAY-OPS",
+  "title": "Industrial Gateway Operations Manual",
+  "type": "manual",
+  "revision": "2.4",
+  "tags": ["manual","operations","gateway"],
+  "content": "Gateways must be installed with restricted management access, time synchronization, centralized logging, and a documented recovery procedure. Firmware updates must be validated in a staging environment before production rollout. Operational teams should retain update evidence, rollback records, and incident timelines for auditability."
+}

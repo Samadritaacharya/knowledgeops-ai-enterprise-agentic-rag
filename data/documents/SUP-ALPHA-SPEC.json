@@ -1,0 +1,8 @@
+{
+  "id": "SUP-ALPHA-SPEC",
+  "title": "Supplier Alpha — Industrial Gateway Specification",
+  "type": "supplier_spec",
+  "revision": "B",
+  "tags": ["gateway","supplier","technical","alpha"],
+  "content": "Supplier Alpha offers the AX-400 industrial edge gateway. Operating temperature is -20°C to +60°C. Ingress protection is IP54. Typical power draw is 18 W. Connectivity includes dual Gigabit Ethernet, Wi-Fi 6, and optional 5G. The device supports TPM 2.0, secure boot, signed firmware, and a five-year security update commitment. Standard lead time is 8 weeks. Unit price for 500 units is EUR 438. Warranty is 36 months. Alpha states that 72% of final assembly electricity is sourced from renewable energy."
+}

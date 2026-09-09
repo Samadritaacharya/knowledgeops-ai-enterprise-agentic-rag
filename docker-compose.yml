@@ -1,0 +1,10 @@
+services:
+  api:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      KNOWLEDGEOPS_ENV: docker
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    ports: ["11434:11434"]

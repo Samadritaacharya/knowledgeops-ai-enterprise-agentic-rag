@@ -1,0 +1,8 @@
+{
+  "id": "POL-SUSTAIN-09",
+  "title": "Sustainable Procurement Guideline",
+  "type": "policy",
+  "revision": "3.1",
+  "tags": ["sustainability","procurement","supplier"],
+  "content": "For comparable suppliers, procurement should consider energy efficiency, warranty duration, renewable electricity share in final assembly, logistics distance, repairability, and evidence quality. Sustainability factors inform the decision but do not override mandatory technical or cybersecurity requirements."
+}

@@ -1,0 +1,8 @@
+{
+  "id": "RISK-SUPPLY-12",
+  "title": "Supply Risk Assessment Framework",
+  "type": "risk",
+  "revision": "5.0",
+  "tags": ["risk","supplier","supply-chain"],
+  "content": "Supply risk should be assessed across technical fit, lead-time exposure, single-source dependency, cybersecurity evidence, commercial volatility, warranty/serviceability, and geopolitical or logistics concentration. A material gap in a mandatory requirement is a stop condition until resolved; preferred criteria can be traded off with documented rationale."
+}

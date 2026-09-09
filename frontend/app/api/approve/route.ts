@@ -1,0 +1,2 @@
+import { NextResponse } from 'next/server';import { runQuery } from '../../../lib/engine';
+export async function POST(req:Request){let body:any;try{body=await req.json()}catch{return NextResponse.json({error:'malformed JSON'},{status:400})}if(!body||typeof body.question!=='string')return NextResponse.json({error:'question required'},{status:422});return NextResponse.json(runQuery(body.question,true),{headers:{'cache-control':'no-store'}})}

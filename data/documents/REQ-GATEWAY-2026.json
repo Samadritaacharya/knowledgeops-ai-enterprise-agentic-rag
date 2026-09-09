@@ -1,0 +1,8 @@
+{
+  "id": "REQ-GATEWAY-2026",
+  "title": "Engineering & Procurement Requirements — Edge Gateway 2026",
+  "type": "requirements",
+  "revision": "1.0",
+  "tags": ["requirements","gateway","procurement"],
+  "content": "The target industrial gateway must operate from at least -20°C to +60°C, provide at least IP54 protection, include dual Ethernet, support hardware-backed key storage and secure boot, and commit to at least five years of security updates. Target unit cost is below EUR 470 at 500 units. Preferred lead time is ten weeks or less. Warranty must be at least 36 months. For high-exposure sites, remote attestation is preferred but not mandatory."
+}
