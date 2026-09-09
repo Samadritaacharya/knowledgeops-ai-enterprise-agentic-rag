@@ -1,0 +1,188 @@
+name: Production Smoke
+
+on:
+  workflow_run:
+    workflows: ["Interactive Web CI"]
+    types: [completed]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Production smoke verification
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      BASE_URL: https://knowledgeops-ai-enterprise-agentic-six.vercel.app
+    steps:
+      - name: Wait for the matching Vercel production commit
+        if: github.event_name == 'workflow_run'
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          node <<'JS'
+          const base = process.env.BASE_URL;
+          const expected = process.env.EXPECTED_SHA;
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          let last = null;
+          for (let attempt = 1; attempt <= 90; attempt++) {
+            try {
+              const r = await fetch(base + '/api/health', { cache: 'no-store' });
+              const body = await r.json();
+              last = body.deployment_sha || null;
+              if (r.ok && last === expected) {
+                console.log(`Production alias is on ${expected}`);
+                process.exit(0);
+              }
+              console.log(`Waiting for Vercel production: attempt=${attempt} live=${last} expected=${expected}`);
+            } catch (error) {
+              console.log(`Waiting for Vercel production: attempt=${attempt} error=${String(error)}`);
+            }
+            await sleep(5000);
+          }
+          throw new Error(`Production did not reach expected commit ${expected}; last observed ${last}`);
+          JS
+
+      - name: Verify production app end to end
+        run: |
+          node <<'JS'
+          const base = process.env.BASE_URL;
+          const assert = (ok, msg) => { if (!ok) throw new Error(msg); };
+          async function json(path, init) {
+            const r = await fetch(base + path, init);
+            let body;
+            try { body = await r.json(); } catch { body = await r.text(); }
+            return { r, body };
+          }
+
+          let r = await fetch(base + '/', { redirect: 'follow' });
+          const html = await r.text();
+          assert(r.ok, `homepage status ${r.status}`);
+          assert(/enterprise knowledge|KnowledgeOps/i.test(html), 'homepage content marker missing');
+          assert(/View source|Verification/i.test(html), 'proof links missing from homepage');
+
+          r = await fetch(base + '/opengraph-image', { redirect: 'follow' });
+          assert(r.ok, `Open Graph image status ${r.status}`);
+          assert((r.headers.get('content-type') || '').includes('image'), 'Open Graph image content type missing');
+
+          let x = await json('/api/health');
+          assert(x.r.ok, `health status ${x.r.status}`);
+          assert(x.body.ok === true, 'health ok != true');
+          assert(x.body.service === 'knowledgeops-ai', 'health service mismatch');
+          assert(x.body.paid_api_required === false, 'public mode unexpectedly requires paid API');
+          assert(x.body.evaluation_cases === 60, 'health evaluation_cases mismatch');
+          assert(typeof x.body.runtime_mode === 'string', 'health runtime mode missing');
+          assert(typeof x.body.backend_configured === 'boolean', 'backend configuration state missing');
+          assert(typeof x.body.deployment_sha === 'string' && x.body.deployment_sha.length >= 7, 'deployment sha missing');
+
+          x = await json('/api/evaluation');
+          assert(x.r.ok, `evaluation status ${x.r.status}`);
+          assert(x.body.cases === 60, 'evaluation case count mismatch');
+          assert(x.body.all_passed === true, 'evaluation gate is not green');
+
+          const compare = 'Compare Alpha and Beta on technical fit, price, lead time and warranty.';
+          x = await json('/api/query', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({ question: compare })
+          });
+          assert(x.r.ok, `compare query status ${x.r.status}`);
+          assert(x.body.status === 'completed', `compare query status=${x.body.status}`);
+          assert(['deterministic-public-demo','langgraph-fastapi'].includes(x.body.runtime_mode), `runtime=${x.body.runtime_mode}`);
+          assert(Array.isArray(x.body.sources) && x.body.sources.length >= 2, 'compare sources missing');
+
+          const brief = 'Create a sourcing decision brief for Alpha versus Beta.';
+          x = await json('/api/query', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({ question: brief })
+          });
+          assert(x.r.ok, `brief query status ${x.r.status}`);
+          assert(x.body.status === 'approval_required', `brief status=${x.body.status}`);
+          assert(x.body.decision_pack?.approval === 'pending', 'brief approval gate missing');
+          const threadId = x.body.thread_id || undefined;
+
+          const decisionBody = (decision, extra = {}) => ({
+            question: brief,
+            decision,
+            ...(threadId ? { thread_id: threadId } : {}),
+            ...extra,
+          });
+
+          x = await json('/api/approve', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify(decisionBody('approve'))
+          });
+          assert(x.r.ok, `approve status ${x.r.status}`);
+          assert(x.body.status === 'completed', `approve result=${x.body.status}`);
+          assert(x.body.decision_pack?.approval === 'approved', 'approve state mismatch');
+
+          const freshEdit = await json('/api/query', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({ question: brief })
+          });
+          const editThread = freshEdit.body.thread_id || undefined;
+          x = await json('/api/approve', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({
+              question: brief,
+              decision: 'edit',
+              ...(editThread ? { thread_id: editThread } : {}),
+              edited_text: 'Production-smoke human edit.'
+            })
+          });
+          assert(x.r.ok, `edit status ${x.r.status}`);
+          assert(x.body.answer === 'Production-smoke human edit.', 'edit text not preserved');
+          assert(x.body.decision_pack?.approval === 'edited', 'edit state mismatch');
+
+          const freshReject = await json('/api/query', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({ question: brief })
+          });
+          const rejectThread = freshReject.body.thread_id || undefined;
+          x = await json('/api/approve', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({
+              question: brief,
+              decision: 'reject',
+              ...(rejectThread ? { thread_id: rejectThread } : {})
+            })
+          });
+          assert(x.r.ok, `reject status ${x.r.status}`);
+          assert(x.body.status === 'rejected', `reject result=${x.body.status}`);
+          assert(x.body.decision_pack?.approval === 'rejected', 'reject state mismatch');
+
+          x = await json('/api/query', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({ question: brief, approved: true })
+          });
+          assert(x.r.status === 422, `self-approval bypass should be 422, got ${x.r.status}`);
+
+          x = await json('/api/approve', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({ question: compare, decision: 'approve' })
+          });
+          assert(x.r.status === 409, `non-brief approval should be 409, got ${x.r.status}`);
+
+          const malformed = await fetch(base + '/api/query', {
+            method: 'POST', headers: {'content-type':'application/json'}, body: '{bad'
+          });
+          assert(malformed.status === 400, `malformed JSON should be 400, got ${malformed.status}`);
+
+          const unknown = await fetch(base + '/api/query', {
+            method: 'POST', headers: {'content-type':'application/json'},
+            body: JSON.stringify({ question: 'valid question', admin_override: true })
+          });
+          assert(unknown.status === 422, `unknown field should be 422, got ${unknown.status}`);
+
+          console.log('Production live smoke passed:', base);
+          JS

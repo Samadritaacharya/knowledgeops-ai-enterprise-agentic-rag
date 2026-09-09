@@ -1,16 +1,116 @@
 import { corpus } from './corpus.ts';
-export type Intent='qa'|'compare'|'risk'|'gap'|'revision'|'brief';
-export type Hit={id:string;title:string;type:string;revision:string;score:number;snippet:string};
-const tok=(s:string)=>Array.from(s.toLowerCase().matchAll(/[a-z0-9€%-]+/g),m=>m[0]);
-export function classify(q:string):Intent{const x=q.toLowerCase();if(x.includes('decision brief')||x.includes('sourcing brief')||x.includes('recommendation brief'))return'brief';if(x.includes('what changed')||x.includes('revision a')||x.includes('revision b')||x.includes('difference between revision'))return'revision';if(x.includes('risk')||x.includes('cybersecurity posture')||x.includes('exposure'))return'risk';if(x.includes('compare')||x.includes('versus')||x.includes(' vs ')||x.includes('which supplier'))return'compare';if(x.includes('unsupported')||x.includes('missing evidence')||x.includes('evidence gap')||x.includes('not evidenced'))return'gap';return'qa'}
-function score(q:string,d:(typeof corpus)[number]){const qs=new Set(tok(q));const ds=tok(`${d.title} ${d.content} ${d.tags.join(' ')}`);let overlap=0;for(const t of ds)if(qs.has(t))overlap++;let s=overlap/Math.sqrt(Math.max(1,ds.length)*Math.max(1,qs.size));const ql=q.toLowerCase();if((ql.includes('supplier')||ql.includes('alpha')||ql.includes('beta'))&&['supplier_spec','commercial'].includes(d.type))s+=.12;if(ql.includes('revision')&&d.type==='revision')s+=.22;if(ql.includes('cyber')&&(d.tags as readonly string[]).includes('cybersecurity'))s+=.15;return s}
-export function retrieve(q:string,k=6):Hit[]{return corpus.map(d=>({id:d.id,title:d.title,type:d.type,revision:d.revision,score:score(q,d),snippet:d.content.slice(0,280)+(d.content.length>280?'…':'')})).sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id)).slice(0,k)}
-function synth(q:string,intent:Intent,hits:Hit[]){let answer='';let citations:string[]=[];let unsupported:string[]=[];
- if(intent==='revision'){answer='Revision B tightens the interface baseline: Wi‑Fi 6E+, a 115 mm enclosure limit, +65°C upper temperature, 48‑month warranty, mandatory integrated 5G, seven years of security updates, and preferred remote attestation.';citations=['SPEC-REV-A','SPEC-REV-B']}
- else if(intent==='compare'){answer='Alpha is the lower-cost and faster option, while Beta provides the more rugged hardware, longer warranty, integrated 5G, remote attestation, and a longer security-update commitment. Against the mandatory 2026 gateway requirements, Alpha meets the stated mandatory baseline and stays below the EUR 470 target; Beta exceeds the target price and standard lead-time preference but has stronger durability/security attributes.';citations=hits.slice(0,5).map(h=>h.id)}
- else if(intent==='risk'){answer='The main decision risks are mandatory-requirement gaps, lead-time exposure, cybersecurity evidence completeness, supply concentration, commercial volatility, and serviceability. Beta has stronger technical/security resilience but higher price and longer standard lead time; Alpha has lower commercial/lead-time exposure but fewer premium security features.';citations=hits.slice(0,5).map(h=>h.id)}
- else if(intent==='gap'){answer='The indexed Alpha material supports secure boot, TPM 2.0 and a five-year update commitment, but the corpus does not provide Alpha-specific evidence for an SBOM, vulnerability-disclosure process, threat model, or incident-communication procedure. Those items remain evidence gaps for a critical deployment review.';citations=hits.slice(0,5).map(h=>h.id);unsupported=['Alpha-specific SBOM evidence not found.','Alpha-specific threat model not found.','Alpha-specific vulnerability-disclosure evidence not found.']}
- else if(intent==='brief'){answer='Draft recommendation: shortlist Alpha as the baseline commercial fit because it meets the mandatory gateway baseline, target price and preferred lead time; keep Beta as the resilience-led alternative where IP67, integrated 5G, remote attestation, longer warranty or seven-year updates justify the premium. Before award, close cybersecurity evidence gaps and obtain category-owner approval.';citations=hits.slice(0,5).map(h=>h.id)}
- else {const h=hits[0];answer=h?`${h.snippet}`:'I could not find supporting evidence in the indexed enterprise corpus.';citations=h?[h.id]:[]}
- return{answer,citations,unsupported}}
-export function runQuery(question:string,approved=false){const started=performance.now();const intent=classify(question);const sources=retrieve(question,6);const s=synth(question,intent,sources);const approvalRequired=intent==='brief'&&!approved;const trace=[{node:'classify',detail:intent},{node:'retrieve',detail:sources.map(x=>x.id).join(', ')},{node:'synthesize',detail:s.citations.join(', ')}];if(intent==='brief')trace.push({node:'human_gate',detail:approved?'approved':'approval required'});trace.push({node:'complete',detail:`${(performance.now()-started).toFixed(2)} ms`});return{question,intent,status:approvalRequired?'approval_required':'completed',answer:s.answer,citations:s.citations,sources,unsupported_claims:s.unsupported,approval_required:approvalRequired,decision_pack:intent==='brief'?{recommendation:s.answer,citations:s.citations,approval:approved?'approved':'pending'}:null,trace}}
+import type {
+  CoreQueryResult,
+  EvidenceSource,
+  Intent,
+  TraceStep,
+} from './contracts.ts';
+
+export type { Intent } from './contracts.ts';
+export type Hit = EvidenceSource;
+
+const tok = (s: string) => Array.from(s.toLowerCase().matchAll(/[a-z0-9€%-]+/g), (m) => m[0]);
+
+export function classify(q: string): Intent {
+  const x = q.toLowerCase();
+  if (x.includes('decision brief') || x.includes('sourcing brief') || x.includes('recommendation brief')) return 'brief';
+  if (x.includes('what changed') || x.includes('revision a') || x.includes('revision b') || x.includes('difference between revision')) return 'revision';
+  if (x.includes('risk') || x.includes('cybersecurity posture') || x.includes('exposure')) return 'risk';
+  if (x.includes('compare') || x.includes('versus') || x.includes(' vs ') || x.includes('which supplier')) return 'compare';
+  if (x.includes('unsupported') || x.includes('missing evidence') || x.includes('evidence gap') || x.includes('not evidenced')) return 'gap';
+  return 'qa';
+}
+
+function score(q: string, d: (typeof corpus)[number]) {
+  const qs = new Set(tok(q));
+  const ds = tok(`${d.title} ${d.content} ${d.tags.join(' ')}`);
+  let overlap = 0;
+  for (const t of ds) if (qs.has(t)) overlap++;
+  let s = overlap / Math.sqrt(Math.max(1, ds.length) * Math.max(1, qs.size));
+  const ql = q.toLowerCase();
+  if ((ql.includes('supplier') || ql.includes('alpha') || ql.includes('beta')) && ['supplier_spec', 'commercial'].includes(d.type)) s += 0.12;
+  if (ql.includes('revision') && d.type === 'revision') s += 0.22;
+  if (ql.includes('cyber') && (d.tags as readonly string[]).includes('cybersecurity')) s += 0.15;
+  return s;
+}
+
+export function retrieve(q: string, k = 6): EvidenceSource[] {
+  return corpus
+    .map((d) => ({
+      id: d.id,
+      title: d.title,
+      type: d.type,
+      revision: d.revision,
+      score: score(q, d),
+      snippet: d.content.slice(0, 280) + (d.content.length > 280 ? '…' : ''),
+    }))
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    .slice(0, k);
+}
+
+function synth(
+  q: string,
+  intent: Intent,
+  hits: EvidenceSource[],
+): { answer: string; citations: string[]; unsupported: string[] } {
+  let answer = '';
+  let citations: string[] = [];
+  let unsupported: string[] = [];
+
+  if (intent === 'revision') {
+    answer = 'Revision B tightens the interface baseline: Wi‑Fi 6E+, a 115 mm enclosure limit, +65°C upper temperature, 48‑month warranty, mandatory integrated 5G, seven years of security updates, and preferred remote attestation.';
+    citations = ['SPEC-REV-A', 'SPEC-REV-B'];
+  } else if (intent === 'compare') {
+    answer = 'Alpha is the lower-cost and faster option, while Beta provides the more rugged hardware, longer warranty, integrated 5G, remote attestation, and a longer security-update commitment. Against the mandatory 2026 gateway requirements, Alpha meets the stated mandatory baseline and stays below the EUR 470 target; Beta exceeds the target price and standard lead-time preference but has stronger durability/security attributes.';
+    citations = hits.slice(0, 5).map((h) => h.id);
+  } else if (intent === 'risk') {
+    answer = 'The main decision risks are mandatory-requirement gaps, lead-time exposure, cybersecurity evidence completeness, supply concentration, commercial volatility, and serviceability. Beta has stronger technical/security resilience but higher price and longer standard lead time; Alpha has lower commercial/lead-time exposure but fewer premium security features.';
+    citations = hits.slice(0, 5).map((h) => h.id);
+  } else if (intent === 'gap') {
+    answer = 'The indexed Alpha material supports secure boot, TPM 2.0 and a five-year update commitment, but the corpus does not provide Alpha-specific evidence for an SBOM, vulnerability-disclosure process, threat model, or incident-communication procedure. Those items remain evidence gaps for a critical deployment review.';
+    citations = hits.slice(0, 5).map((h) => h.id);
+    unsupported = [
+      'Alpha-specific SBOM evidence not found.',
+      'Alpha-specific threat model not found.',
+      'Alpha-specific vulnerability-disclosure evidence not found.',
+    ];
+  } else if (intent === 'brief') {
+    answer = 'Draft recommendation: shortlist Alpha as the baseline commercial fit because it meets the mandatory gateway baseline, target price and preferred lead time; keep Beta as the resilience-led alternative where IP67, integrated 5G, remote attestation, longer warranty or seven-year updates justify the premium. Before award, close cybersecurity evidence gaps and obtain category-owner approval.';
+    citations = hits.slice(0, 5).map((h) => h.id);
+  } else {
+    const h = hits[0];
+    answer = h ? h.snippet : 'I could not find supporting evidence in the indexed enterprise corpus.';
+    citations = h ? [h.id] : [];
+  }
+  return { answer, citations, unsupported };
+}
+
+export function runQuery(question: string, approved = false): CoreQueryResult {
+  const started = performance.now();
+  const intent = classify(question);
+  const sources = retrieve(question, 6);
+  const s = synth(question, intent, sources);
+  const approvalRequired = intent === 'brief' && !approved;
+  const trace: TraceStep[] = [
+    { node: 'classify', detail: intent },
+    { node: 'retrieve', detail: sources.map((x) => x.id).join(', ') },
+    { node: 'synthesize', detail: s.citations.join(', ') },
+  ];
+  if (intent === 'brief') trace.push({ node: 'human_gate', detail: approved ? 'approved' : 'approval required' });
+  trace.push({ node: 'complete', detail: `${(performance.now() - started).toFixed(2)} ms` });
+
+  return {
+    question,
+    intent,
+    status: approvalRequired ? 'approval_required' : 'completed',
+    answer: s.answer,
+    citations: s.citations,
+    sources,
+    unsupported_claims: s.unsupported,
+    approval_required: approvalRequired,
+    decision_pack: intent === 'brief'
+      ? { recommendation: s.answer, citations: s.citations, approval: approved ? 'approved' : 'pending' }
+      : null,
+    trace,
+  };
+}

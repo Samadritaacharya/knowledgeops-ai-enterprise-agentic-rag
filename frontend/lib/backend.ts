@@ -1,7 +1,15 @@
 import { runQuery } from './engine.ts';
+import type {
+  ApprovalState,
+  GraphEnvelope,
+  GraphState,
+  HumanDecision,
+  QueryResult,
+  RuntimeMode,
+  TraceStep,
+} from './contracts.ts';
 
-export type HumanDecision = 'approve' | 'reject' | 'edit';
-export type RuntimeMode = 'deterministic-public-demo' | 'langgraph-fastapi';
+export type { HumanDecision, RuntimeMode } from './contracts.ts';
 
 export class BackendRequestError extends Error {
   status: number;
@@ -16,11 +24,15 @@ function backendUrl() {
   return (process.env.KNOWLEDGEOPS_API_URL || '').trim().replace(/\/+$/, '');
 }
 
-export function runtimeMode(): RuntimeMode {
-  return backendUrl() ? 'langgraph-fastapi' : 'deterministic-public-demo';
+export function backendConfigured(): boolean {
+  return Boolean(backendUrl());
 }
 
-async function readJson(res: Response) {
+export function runtimeMode(): RuntimeMode {
+  return backendConfigured() ? 'langgraph-fastapi' : 'deterministic-public-demo';
+}
+
+async function readJson(res: Response): Promise<unknown> {
   const text = await res.text();
   try {
     return text ? JSON.parse(text) : {};
@@ -29,8 +41,16 @@ async function readJson(res: Response) {
   }
 }
 
-function traceFromGraph(state: any, status: string) {
-  const trace = [
+function errorMessage(value: unknown, fallback: string): string {
+  if (!value || typeof value !== 'object') return fallback;
+  const record = value as Record<string, unknown>;
+  const detail = typeof record.detail === 'string' ? record.detail : null;
+  const error = typeof record.error === 'string' ? record.error : null;
+  return detail || error || fallback;
+}
+
+function traceFromGraph(state: GraphState, status: string): TraceStep[] {
+  const trace: TraceStep[] = [
     { node: 'classify', detail: state.intent || 'unknown' },
     { node: 'retrieve', detail: (state.source_ids || []).join(', ') },
     { node: 'synthesize', detail: (state.citations || []).join(', ') },
@@ -46,11 +66,11 @@ function traceFromGraph(state: any, status: string) {
   return trace;
 }
 
-function normalizeGraphResponse(graph: any, question: string) {
-  const state = graph?.state || {};
-  const status = graph?.status || 'completed';
+function normalizeGraphResponse(graph: GraphEnvelope, question: string): QueryResult {
+  const state = graph.state || {};
+  const status = graph.status || 'completed';
   const approval = state.approval?.decision;
-  const decisionApproval =
+  const decisionApproval: ApprovalState =
     status === 'approval_required'
       ? 'pending'
       : approval === 'approve'
@@ -79,12 +99,12 @@ function normalizeGraphResponse(graph: any, question: string) {
           }
         : null,
     trace: traceFromGraph(state, status),
-    thread_id: graph?.thread_id || null,
-    runtime_mode: 'langgraph-fastapi' as const,
+    thread_id: graph.thread_id || null,
+    runtime_mode: 'langgraph-fastapi',
   };
 }
 
-function localDecision(question: string, decision: HumanDecision, editedText?: string) {
+function localDecision(question: string, decision: HumanDecision, editedText?: string): QueryResult {
   const pending = runQuery(question, false);
   if (!pending.approval_required) {
     throw new BackendRequestError(409, 'only pending decision briefs can be reviewed');
@@ -104,7 +124,7 @@ function localDecision(question: string, decision: HumanDecision, editedText?: s
         { node: 'complete', detail: 'rejected' },
       ],
       thread_id: null,
-      runtime_mode: 'deterministic-public-demo' as const,
+      runtime_mode: 'deterministic-public-demo',
     };
   }
 
@@ -124,24 +144,24 @@ function localDecision(question: string, decision: HumanDecision, editedText?: s
         x.node === 'human_gate' ? { ...x, detail: 'edit' } : x,
       ),
       thread_id: null,
-      runtime_mode: 'deterministic-public-demo' as const,
+      runtime_mode: 'deterministic-public-demo',
     };
   }
 
   return {
     ...completed,
     thread_id: null,
-    runtime_mode: 'deterministic-public-demo' as const,
+    runtime_mode: 'deterministic-public-demo',
   };
 }
 
-export async function executeQuery(question: string) {
+export async function executeQuery(question: string): Promise<QueryResult> {
   const base = backendUrl();
   if (!base) {
     return {
       ...runQuery(question, false),
       thread_id: null,
-      runtime_mode: 'deterministic-public-demo' as const,
+      runtime_mode: 'deterministic-public-demo',
     };
   }
 
@@ -153,9 +173,9 @@ export async function executeQuery(question: string) {
   });
   const json = await readJson(res);
   if (!res.ok) {
-    throw new BackendRequestError(res.status, json?.detail || json?.error || 'backend query failed');
+    throw new BackendRequestError(res.status, errorMessage(json, 'backend query failed'));
   }
-  return normalizeGraphResponse(json, question);
+  return normalizeGraphResponse(json as GraphEnvelope, question);
 }
 
 export async function executeDecision(input: {
@@ -163,7 +183,7 @@ export async function executeDecision(input: {
   threadId?: string | null;
   decision: HumanDecision;
   editedText?: string;
-}) {
+}): Promise<QueryResult> {
   const base = backendUrl();
   if (!base) {
     return localDecision(input.question, input.decision, input.editedText);
@@ -191,7 +211,7 @@ export async function executeDecision(input: {
   });
   const json = await readJson(res);
   if (!res.ok) {
-    throw new BackendRequestError(res.status, json?.detail || json?.error || 'backend decision failed');
+    throw new BackendRequestError(res.status, errorMessage(json, 'backend decision failed'));
   }
-  return normalizeGraphResponse(json, input.question);
+  return normalizeGraphResponse(json as GraphEnvelope, input.question);
 }
