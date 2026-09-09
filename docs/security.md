@@ -15,19 +15,21 @@ KnowledgeOps AI is designed as a portfolio-safe enterprise AI reference implemen
 - Question, thread-ID and edited-text fields are length bounded.
 - Invalid approval decisions are rejected by schema validation.
 - An edit decision requires explicit human-edited text.
-- The interactive web API additionally rejects malformed JSON and oversized request bodies.
+- The interactive web API rejects malformed JSON, unknown fields and oversized request bodies on both query and approval routes.
 
 ## Approval integrity
 
-A normal deterministic query can create a **draft decision brief**, but an API caller cannot mark that brief approved by supplying an `approved=true` field. That field is not part of the public request contract and is rejected.
+A normal deterministic query can create a **draft decision brief**, but a caller cannot mark that brief approved by supplying an `approved=true` field. Both the FastAPI deterministic query and the Next.js `/api/query` route reject that bypass pattern.
 
-Approval is completed only through the stateful LangGraph flow:
+The Python governance reference completes approval through the stateful LangGraph flow:
 
 1. `/v1/graph/query` creates or continues a thread.
 2. A decision brief reaches a real LangGraph `interrupt()` and returns `approval_required`.
 3. `/v1/graph/resume` accepts an explicit human `approve`, `edit` or `reject` decision for that thread.
 4. `edit` replaces the draft answer with the human-edited text.
 5. `reject` returns an explicit `rejected` status rather than being represented as successful approval.
+
+The zero-key Next.js demo keeps its public decision UX stateless by design. `/api/query` can only create a pending draft, while `/api/approve` is a separate explicit user action and refuses non-brief questions. This is an interaction boundary, not an identity/authentication control; production use would require authenticated users and durable approval/audit state.
 
 These paths are exercised in GitHub Actions end-to-end tests.
 
